@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# ops-report - summarize the ops-toolkit JSON log (thin wrapper around the Python opsreport CLI).
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# -I (isolated mode): ignore PYTHON* variables and user site-packages, and never put the
+# current directory on sys.path - otherwise `cd /tmp && sudo ops-report` could import a
+# planted /tmp/json.py as root. report.py only uses the standard library.
+exec python3 -I "$OPS_ROOT/opsreport/report.py" "$@"
