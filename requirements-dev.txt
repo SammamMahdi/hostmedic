@@ -1,0 +1,3 @@
+# Test/lint tools only; the toolkit itself needs no Python packages.
+pytest==9.1.1
+ruff==0.16.9

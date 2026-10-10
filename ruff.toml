@@ -1,0 +1,10 @@
+line-length = 110
+target-version = "py310"
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "PLW", "RUF"]
+# Line length is enforced by `ruff format`; long string literals are left alone.
+ignore = ["E501"]
+
+[lint.isort]
+known-first-party = ["opsreport"]
