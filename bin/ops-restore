@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+# ops-restore - verify an ops-backup archive against its SHA-256 manifest, then extract it safely.
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=lib/common.sh
+source "$OPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ops-restore [--force] ARCHIVE TARGET_DIR
+
+Restores an archive made by ops-backup into TARGET_DIR (paths inside the
+archive are relative, e.g. TARGET_DIR/etc/myapp/...). Restore into a new
+staging directory (it is created with mode 0700), inspect it, then move files
+into place.
+
+Before extracting it:
+  - verifies ARCHIVE against ARCHIVE.sha256 and refuses on any mismatch
+  - refuses members with absolute paths or '..' components
+  - refuses an existing TARGET_DIR that is not owned by you or is writable by
+    group/others (another user could plant symlinks in it)
+  - refuses a non-empty TARGET_DIR unless --force is given
+  - with --force, refuses if a directory on the way to a member is a symlink
+    in TARGET_DIR (tar would follow it and write outside the target)
+  - refuses '/', system directories and home directories as TARGET_DIR
+
+Options:
+  --force     allow restoring into a non-empty directory (existing files
+              with the same names are replaced)
+  -h, --help  show this help
+
+Exit codes: 0 success, 1 failure or refused, 64 usage error.
+EOF
+}
+
+main() {
+  local force=0
+  local -a pos=()
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; exit 0 ;;
+      --force) force=1 ;;
+      --) shift; pos+=("$@"); break ;;
+      -*) ops_usage_error "unknown option: $1" ;;
+      *) pos+=("$1") ;;
+    esac
+    shift
+  done
+  if ((${#pos[@]} != 2)); then ops_usage_error "expected ARCHIVE and TARGET_DIR"; fi
+  ops_init action
+  umask 077
+  ops_require_cmd tar gzip sha256sum realpath find
+
+  # 1. Cheap checks first: archive, manifest and target.
+  local archive manifest target non_empty=0
+  archive=$(realpath -e -- "${pos[0]}" 2>/dev/null) || ops_die "archive not found: ${pos[0]}"
+  if [[ ! -f $archive ]]; then ops_die "archive is not a regular file: $archive"; fi
+  manifest="$archive.sha256"
+  if [[ ! -f $manifest ]]; then
+    ops_die "checksum manifest missing: $manifest; refusing to restore an unverified archive"
+  fi
+  target=$(realpath -m -- "${pos[1]}")
+  if ops_is_dangerous_dir "$target"; then
+    ops_die "refusing to restore into $target (root, system directory or home)" "restore into a new directory, e.g. /root/restore-\$(date +%F), and copy what you need"
+  fi
+  local exists=0
+  if [[ -e $target || -L $target ]]; then
+    exists=1
+    ops_require_safe_dir "$target" "restore target"
+    if [[ -n $(find "$target" -mindepth 1 -maxdepth 1 -print -quit) ]]; then
+      non_empty=1
+      if ((!force)); then
+        ops_die "target $target is not empty; refusing to overwrite existing files" "restore into an empty directory, or re-run with --force"
+      fi
+    fi
+  fi
+
+  # 2. Integrity: the archive must match its SHA-256 manifest exactly.
+  local expected mname actual
+  read -r expected mname _ <"$manifest" || true
+  if [[ ! ${expected:-} =~ ^[0-9a-f]{64}$ || ${mname:-} != "${archive##*/}" ]]; then
+    ops_die "manifest $manifest is malformed or belongs to another archive ('${mname:-}')"
+  fi
+  actual=$(sha256sum <"$archive") # stdin: no "\" prefix for names containing a backslash
+  actual=${actual%% *}
+  if [[ $actual != "$expected" ]]; then
+    ops_die "checksum mismatch for $archive (expected $expected, got $actual): the archive is corrupt or was modified; refusing to restore" \
+      "use another backup; compare with off-host copies of the .sha256 file"
+  fi
+  ops_log INFO restore "checksum verified for ${archive##*/}" "archive=$archive" "sha256=$actual"
+
+  # 3. Member paths: nothing absolute, no '..' (defence in depth on top of GNU tar's own checks).
+  local listing n
+  local -a names
+  listing=$(tar --list --gzip --file "$archive") || ops_die "cannot read archive $archive"
+  mapfile -t names <<<"$listing"
+  for n in "${names[@]}"; do
+    if [[ $n == /* || $n =~ (^|/)\.\.(/|$) ]]; then
+      ops_die "unsafe member path in archive: '$n'; refusing to restore"
+    fi
+  done
+
+  # 4. With --force: tar follows existing symlinked directories on the way to a member, so a
+  #    symlink in the target could redirect writes outside it. Refuse those.
+  if ((non_empty)); then
+    local -A seen=()
+    local p
+    for n in "${names[@]}"; do
+      p=${n#./}
+      p=${p%/}
+      while [[ $p == */* ]]; do
+        p=${p%/*}
+        if [[ -n ${seen[$p]-} ]]; then break; fi
+        seen[$p]=1
+        if [[ -L $target/$p ]]; then
+          ops_die "$target/$p is a symlink; extracting through it could write outside $target" "remove the symlink or restore into an empty directory"
+        fi
+      done
+    done
+    ops_log WARN restore "restoring into non-empty $target (--force): files with the same names will be replaced" "target=$target"
+  fi
+
+  if ((!exists)); then
+    # Plain mkdir (not -p) for the target itself: if someone created it since the check
+    # above, this fails instead of extracting into a directory we do not control.
+    mkdir -p -- "$(dirname -- "$target")"
+    mkdir -m 0700 -- "$target" || ops_die "could not create $target (did it appear meanwhile?)"
+  fi
+  tar --extract --gzip --file "$archive" --directory "$target"
+  ops_log INFO restore "restored ${#names[@]} entries from ${archive##*/} into $target" "archive=$archive" \
+    "target=$target" "entries=${#names[@]}"
+}
+
+main "$@"

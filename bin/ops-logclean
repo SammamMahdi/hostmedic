@@ -1,0 +1,111 @@
+#!/usr/bin/env bash
+# ops-logclean - compress old *.log and delete old *.log.gz inside ONE configured directory.
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=lib/common.sh
+source "$OPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ops-logclean [--apply]
+
+Dry-run by default: lists what would be done and changes nothing.
+  1. delete   *.log.gz not modified for OPS_LOGCLEAN_DELETE_DAYS   (default 30)
+  2. compress *.log    not modified for OPS_LOGCLEAN_COMPRESS_DAYS (default 7)
+Only regular files under OPS_LOGCLEAN_DIR (required) on the same filesystem are
+considered; symlinks are never followed, so nothing outside the directory is
+touched. '/', system directories (/etc, /usr, /var, /var/log itself, ...) and
+home directories are refused. Use it for one application's directory such as
+/var/log/myapp; /var/log itself belongs to logrotate.
+
+Options:
+  --apply     actually compress and delete
+  -h, --help  show this help
+
+Exit codes: 0 success, 1 failure or refused, 64 usage error.
+EOF
+}
+
+main() {
+  local apply=0
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; exit 0 ;;
+      --apply) apply=1 ;;
+      *) ops_usage_error "unknown argument: $1" ;;
+    esac
+    shift
+  done
+  ops_init action
+  ops_require_uint OPS_LOGCLEAN_COMPRESS_DAYS OPS_LOGCLEAN_DELETE_DAYS
+  if ((OPS_LOGCLEAN_COMPRESS_DAYS < 1 || OPS_LOGCLEAN_DELETE_DAYS < 1)); then
+    ops_die "OPS_LOGCLEAN_COMPRESS_DAYS and OPS_LOGCLEAN_DELETE_DAYS must be at least 1"
+  fi
+  ops_require_cmd find gzip realpath
+  if [[ -z $OPS_LOGCLEAN_DIR ]]; then ops_die "OPS_LOGCLEAN_DIR is not set" "set it to your application's log directory, e.g. /var/log/myapp"; fi
+  if [[ $OPS_LOGCLEAN_DIR != /* ]]; then ops_die "OPS_LOGCLEAN_DIR must be an absolute path: '$OPS_LOGCLEAN_DIR'"; fi
+  local dir
+  dir=$(realpath -e -- "$OPS_LOGCLEAN_DIR" 2>/dev/null) || ops_die "log directory does not exist: $OPS_LOGCLEAN_DIR"
+  if [[ ! -d $dir ]]; then ops_die "not a directory: $dir"; fi
+  if ops_is_dangerous_dir "$dir"; then
+    ops_die "refusing to clean $dir (resolved from $OPS_LOGCLEAN_DIR): root, system directory or home" "point OPS_LOGCLEAN_DIR at one application's log directory"
+  fi
+
+  local mode=dry-run verb_del="would delete" verb_gz="would compress"
+  if ((apply)); then mode=apply verb_del=deleted verb_gz=compressed; fi
+  local now gzip_bin
+  now=$(date +%s)
+  gzip_bin=$(command -v gzip)
+
+  # find prints one NUL-terminated record per file: "ok|fail SIZE MTIME PATH".
+  # With --apply, find itself acts on the file it is looking at (-delete, -execdir) instead of
+  # this script re-opening the path later, so a directory swapped for a symlink after it was
+  # listed cannot redirect a delete or gzip outside OPS_LOGCLEAN_DIR.
+  local rec='%s %T@ %p\0'
+  local -a del_act=(-printf "ok $rec") gz_act=(-printf "ok $rec")
+  if ((apply)); then
+    del_act=('(' -delete -printf "ok $rec" -o -printf "fail $rec" ')')
+    # gzip refuses symlinks, hard-linked files and existing .gz targets: nothing is overwritten.
+    gz_act=('(' -execdir "$gzip_bin" -- '{}' ';' -printf "ok $rec" -o -printf "fail $rec" ')')
+  fi
+  # -execdir refuses to run with relative directories in PATH; use a fixed system PATH.
+  local safe_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  local status size mtime f n_del=0 n_gz=0 n_fail=0 bytes=0
+
+  # -mmin instead of -mtime: "-mtime +7" means "at least 8 whole days", a classic off-by-one.
+  # find without -L never follows symlinks; -type f skips symlinks; -xdev stays on this filesystem.
+  # Deletion runs first, so a dry run lists exactly what --apply will do.
+  while IFS=' ' read -r -d '' status size mtime f; do
+    if [[ $status != ok ]]; then
+      n_fail=$((n_fail + 1))
+      ops_log WARN logclean "could not delete $f" "file=$f"
+      continue
+    fi
+    n_del=$((n_del + 1))
+    bytes=$((bytes + size))
+    ops_log INFO logclean "$verb_del $f" "file=$f" "age_days=$(((now - ${mtime%.*}) / 86400))" "size_bytes=$size" "mode=$mode"
+  done < <(PATH=$safe_path find "$dir" -xdev -type f -name '*.log.gz' \
+    -mmin "+$((OPS_LOGCLEAN_DELETE_DAYS * 1440))" "${del_act[@]}")
+
+  while IFS=' ' read -r -d '' status size mtime f; do
+    if [[ $status != ok ]]; then
+      n_fail=$((n_fail + 1))
+      ops_log WARN logclean "could not compress $f" "file=$f" \
+        hint="check whether $f.gz already exists or the file has several hard links (see gzip's message above)"
+      continue
+    fi
+    n_gz=$((n_gz + 1))
+    ops_log INFO logclean "$verb_gz $f" "file=$f" "age_days=$(((now - ${mtime%.*}) / 86400))" "size_bytes=$size" "mode=$mode"
+  done < <(PATH=$safe_path find "$dir" -xdev -type f -name '*.log' \
+    -mmin "+$((OPS_LOGCLEAN_COMPRESS_DAYS * 1440))" "${gz_act[@]}")
+
+  local msg="$mode in $dir: $verb_del $n_del file(s) ($bytes bytes), $verb_gz $n_gz file(s)"
+  if ((!apply)); then msg+="; nothing changed - re-run with --apply to act"; fi
+  if ((n_fail > 0)); then
+    ops_log WARN logclean "$msg, $n_fail failure(s)" "dir=$dir" "delete_count=$n_del" "compress_count=$n_gz" "failed=$n_fail" "mode=$mode"
+    ops_exit 1
+  fi
+  ops_log INFO logclean "$msg" "dir=$dir" "delete_count=$n_del" "compress_count=$n_gz" "delete_bytes=$bytes" "mode=$mode"
+}
+
+main "$@"

@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# ops-backup - tar.gz backup of configured directories with a SHA-256 manifest and retention.
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=lib/common.sh
+source "$OPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ops-backup [--help]
+
+Creates DEST/ops-backup-YYYYmmddTHHMMSSZ.tar.gz from the configured source
+directories, writes DEST/<archive>.sha256 (sha256sum format) next to it and then
+deletes the oldest backups so that only the newest OPS_BACKUP_KEEP remain.
+
+  OPS_BACKUP_SOURCES  absolute directories, space-separated (required)
+  OPS_BACKUP_DEST     where archives are written      (default /var/backups/ops-toolkit)
+  OPS_BACKUP_KEEP     number of backups to keep       (default 7)
+
+Safety: archives are created with umask 077 (mode 0600); a lock (flock) stops two
+runs at once; '/', pseudo filesystems, relative paths and a destination inside a
+source are refused; DEST must be owned by you and not writable by group/others;
+retention only deletes files named like ops-backup-*.tar.gz and never the archive
+it just wrote. Paths are stored relative to '/', so a restore never writes absolute paths.
+
+Exit codes: 0 success, 1 failure or refused, 64 usage error.
+EOF
+}
+
+# prune_old_backups DEST CURRENT - keep the newest OPS_BACKUP_KEEP archives. CURRENT (the one just
+# written) is never deleted, even if the clock went backwards and it sorts as the oldest.
+prune_old_backups() {
+  local dest=$1 current=$2 f
+  local -a all=()
+  while IFS= read -r -d '' f; do
+    f=${f##*/}
+    if [[ $f =~ ^ops-backup-[0-9]{8}T[0-9]{6}Z\.tar\.gz$ && $f != "$current" ]]; then all+=("$f"); fi
+  done < <(find "$dest" -maxdepth 1 -type f -name 'ops-backup-*.tar.gz' -print0)
+  # Fixed-width UTC timestamps in the name: lexical order == chronological order.
+  mapfile -t all < <(printf '%s\n' "${all[@]}" | LC_ALL=C sort)
+  local excess=$((${#all[@]} - (OPS_BACKUP_KEEP - 1))) i
+  for ((i = 0; i < excess; i++)); do
+    if [[ -z ${all[i]} ]]; then continue; fi
+    rm -f -- "$dest/${all[i]}" "$dest/${all[i]}.sha256"
+    ops_log INFO backup "pruned old backup ${all[i]} (keeping newest $OPS_BACKUP_KEEP)" "archive=$dest/${all[i]}"
+  done
+}
+
+main() {
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; exit 0 ;;
+      *) ops_usage_error "unknown argument: $1" ;;
+    esac
+  done
+  ops_init action
+  umask 077
+  ops_require_min 1 OPS_BACKUP_KEEP
+  ops_require_cmd tar gzip sha256sum flock realpath find stat
+
+  local -a sources members=()
+  read -r -a sources <<<"$OPS_BACKUP_SOURCES"
+  if ((${#sources[@]} == 0)); then
+    ops_die "OPS_BACKUP_SOURCES is empty: nothing to back up" "set OPS_BACKUP_SOURCES=\"/etc/myapp /srv/myapp\" in the config file"
+  fi
+  if [[ $OPS_BACKUP_DEST != /* ]]; then ops_die "OPS_BACKUP_DEST must be an absolute path: '$OPS_BACKUP_DEST'"; fi
+  local dest
+  dest=$(realpath -m -- "$OPS_BACKUP_DEST")
+  if ops_is_dangerous_dir "$dest"; then ops_die "refusing to write backups into $dest (system directory or home)"; fi
+
+  local src real
+  for src in "${sources[@]}"; do
+    if [[ $src != /* ]]; then ops_die "backup source must be an absolute path: '$src'"; fi
+    real=$(realpath -e -- "$src" 2>/dev/null) || ops_die "backup source does not exist: $src"
+    if [[ ! -d $real ]]; then ops_die "backup source is not a directory: $src"; fi
+    case $real in
+      / | /proc | /proc/* | /sys | /sys/* | /dev | /dev/* | /run | /run/*)
+        ops_die "refusing to back up '$real' (the whole root or a pseudo filesystem)" "list the directories you need, e.g. /etc /srv/app" ;;
+    esac
+    if [[ $dest == "$real" || $dest == "$real"/* ]]; then
+      ops_die "destination $dest is inside source $real: the backup would include itself" "choose an OPS_BACKUP_DEST outside every source"
+    fi
+    members+=(".$real")
+  done
+
+  mkdir -p -- "$dest"
+  # Only we may write here; otherwise a planted symlink (lock file, *.partial) could make
+  # this root process overwrite another file.
+  ops_require_safe_dir "$dest" "backup destination"
+  # One backup at a time: a second run (e.g. timer + manual) fails fast instead of racing.
+  # >> opens the lock without truncating anything.
+  exec 9>>"$dest/.ops-backup.lock"
+  if ! flock -n 9; then
+    ops_die "another ops-backup is already running (lock: $dest/.ops-backup.lock)" "wait for it to finish; check with 'pgrep -af ops-backup'"
+  fi
+
+  local stamp name archive partial rc=0 start
+  stamp=$(date -u +%Y%m%dT%H%M%SZ)
+  name="ops-backup-$stamp.tar.gz"
+  archive="$dest/$name"
+  partial="$archive.partial"
+  if [[ -e $archive || -L $archive || -e $partial || -L $partial ]]; then
+    ops_die "$archive or its .partial file already exists (two backups in the same second?)"
+  fi
+  OPS_CLEANUP_FILES=("$partial" "$partial.sha256") # removed by the EXIT trap if we fail
+  start=$SECONDS
+
+  tar --create --gzip --file "$partial" --directory / -- "${members[@]}" || rc=$?
+  if ((rc == 1)); then
+    # GNU tar exit 1: some files changed while being read; the archive is usable.
+    ops_log WARN backup "some files changed while they were archived; archive kept" "archive=$archive" \
+      hint="for consistent backups of live data stop the writer or use a DB-native dump first"
+  elif ((rc != 0)); then
+    ops_die "tar failed (exit $rc); no backup written" "check the messages above (permissions? disk full? 'df -h $dest')"
+  fi
+
+  local sum size
+  # Read via stdin: sha256sum escapes file names containing a backslash ("\<hash>").
+  sum=$(sha256sum <"$partial")
+  sum=${sum%% *}
+  printf '%s  %s\n' "$sum" "$name" >"$partial.sha256"
+  mv -- "$partial" "$archive"
+  mv -- "$partial.sha256" "$archive.sha256"
+  size=$(stat -c %s -- "$archive")
+  ops_log INFO backup "backup created: $archive ($size bytes)" "archive=$archive" "size_bytes=$size" \
+    "sha256=$sum" "sources=${sources[*]}" "duration_s=$((SECONDS - start))"
+
+  prune_old_backups "$dest" "$name"
+}
+
+main "$@"
