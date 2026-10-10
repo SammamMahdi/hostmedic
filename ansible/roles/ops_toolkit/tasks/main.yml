@@ -1,0 +1,77 @@
+---
+- name: Install runtime dependencies
+  ansible.builtin.apt:
+    name: "{{ ops_toolkit_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+  when: ops_toolkit_install_packages | bool
+
+- name: Create directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "{{ item.mode }}"
+  loop:
+    - { path: "{{ ops_toolkit_prefix }}", mode: "0755" }
+    - { path: "{{ ops_toolkit_prefix }}/bin", mode: "0755" }
+    - { path: "{{ ops_toolkit_prefix }}/lib", mode: "0755" }
+    - { path: "{{ ops_toolkit_prefix }}/opsreport", mode: "0755" }
+    - { path: "{{ ops_toolkit_config_dir }}", mode: "0750" }
+    - { path: "{{ ops_toolkit_log_dir }}", mode: "0750" }
+
+- name: Install commands
+  ansible.builtin.copy:
+    src: "{{ ops_toolkit_src }}/bin/{{ item }}"
+    dest: "{{ ops_toolkit_prefix }}/bin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ ops_toolkit_commands }}"
+
+- name: Install library, report module and README
+  ansible.builtin.copy:
+    src: "{{ ops_toolkit_src }}/{{ item }}"
+    dest: "{{ ops_toolkit_prefix }}/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ ops_toolkit_files }}"
+
+- name: Link commands into /usr/local/bin
+  ansible.builtin.file:
+    src: "{{ ops_toolkit_prefix }}/bin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+  loop: "{{ ops_toolkit_commands }}"
+
+- name: Render configuration (root-only, it may list internal hosts)
+  ansible.builtin.template:
+    src: ops-toolkit.conf.j2
+    dest: "{{ ops_toolkit_config_dir }}/ops-toolkit.conf"
+    owner: root
+    group: root
+    mode: "0640"
+
+- name: Install and enable the health-check timer
+  when: ops_toolkit_manage_systemd | bool
+  block:
+    - name: Install systemd units
+      ansible.builtin.copy:
+        src: "{{ ops_toolkit_src }}/systemd/{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - ops-health.service
+        - ops-health.timer
+
+    - name: Enable and start ops-health.timer
+      ansible.builtin.systemd_service:
+        name: ops-health.timer
+        enabled: true
+        state: started
+        daemon_reload: true

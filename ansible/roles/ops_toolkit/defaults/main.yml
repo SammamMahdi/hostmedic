@@ -1,0 +1,56 @@
+---
+# Repository checkout on the control node that holds bin/, lib/, opsreport/ and systemd/.
+ops_toolkit_src: "{{ playbook_dir }}/.."
+ops_toolkit_prefix: /opt/ops-toolkit
+ops_toolkit_config_dir: /etc/ops-toolkit
+ops_toolkit_log_dir: /var/log/ops-toolkit
+
+# Set to false where systemd is not PID 1 (containers, WSL without systemd).
+ops_toolkit_manage_systemd: true
+ops_toolkit_install_packages: true
+ops_toolkit_packages:
+  - bash
+  - coreutils
+  - curl
+  - findutils
+  - gawk
+  - gzip
+  - iproute2
+  - procps
+  - python3
+  - tar
+  - util-linux
+
+ops_toolkit_commands:
+  - ops-backup
+  - ops-health
+  - ops-logclean
+  - ops-netdiag
+  - ops-report
+  - ops-restore
+  - ops-services
+
+ops_toolkit_files:
+  - README.md
+  - lib/common.sh
+  - opsreport/__init__.py
+  - opsreport/__main__.py
+  - opsreport/report.py
+
+# Rendered into /etc/ops-toolkit/ops-toolkit.conf (KEY=VALUE; see config/ops-toolkit.conf.example).
+ops_toolkit_config:
+  OPS_LOG_DIR: "{{ ops_toolkit_log_dir }}"
+  OPS_LOAD_WARN: 100
+  OPS_LOAD_CRIT: 200
+  OPS_MEM_WARN: 85
+  OPS_MEM_CRIT: 95
+  OPS_DISK_WARN: 80
+  OPS_DISK_CRIT: 90
+  OPS_INODE_WARN: 80
+  OPS_INODE_CRIT: 90
+  OPS_SYSTEMD_UNITS: ""
+  OPS_TCP_CHECKS: ""
+  OPS_HTTP_CHECKS: ""
+  OPS_BACKUP_SOURCES: "{{ ops_toolkit_config_dir }}"
+  OPS_BACKUP_DEST: /var/backups/ops-toolkit
+  OPS_BACKUP_KEEP: 7

@@ -1,0 +1,14 @@
+[Unit]
+Description=Run ops-health every 5 minutes
+Documentation=file:/opt/ops-toolkit/README.md
+
+[Timer]
+OnCalendar=*:0/5
+# Run once at boot if a scheduled run was missed while the machine was off.
+Persistent=true
+# Spread load when many hosts share the same schedule.
+RandomizedDelaySec=30s
+Unit=ops-health.service
+
+[Install]
+WantedBy=timers.target

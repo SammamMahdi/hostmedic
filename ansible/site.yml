@@ -1,0 +1,12 @@
+---
+# Install ops-toolkit to /opt/ops-toolkit, render /etc/ops-toolkit/ops-toolkit.conf and
+# (where systemd is available) enable the 5-minute ops-health timer.
+#
+#   ansible-playbook -i ansible/inventory.ini ansible/site.yml
+#   ansible-playbook -i ansible/inventory.ini ansible/site.yml -e ops_toolkit_manage_systemd=false
+- name: Install ops-toolkit
+  hosts: ops_hosts
+  become: true
+  gather_facts: false
+  roles:
+    - role: ops_toolkit

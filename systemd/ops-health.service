@@ -1,0 +1,42 @@
+[Unit]
+Description=ops-toolkit host health check (CPU, memory, disk, inodes)
+Documentation=file:/opt/ops-toolkit/README.md
+
+[Service]
+Type=oneshot
+ExecStart=/opt/ops-toolkit/bin/ops-health
+Environment=OPS_CONFIG=/etc/ops-toolkit/ops-toolkit.conf
+Environment=OPS_LOG_DIR=/var/log/ops-toolkit
+# Exit 1 (WARNING) is logged but does not fail the unit. Exit 2/3 (CRITICAL/UNKNOWN)
+# mark the unit failed: visible in `systemctl --failed` and usable for OnFailure= alerting.
+SuccessExitStatus=1
+# A hung NFS mount must not keep the check running forever.
+TimeoutStartSec=120
+Nice=10
+
+# Creates /var/log/ops-toolkit (root, 0750) before the sandbox below is set up.
+LogsDirectory=ops-toolkit
+LogsDirectoryMode=0750
+
+# Hardening: the check only reads /proc and filesystem statistics and appends to its log.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/log/ops-toolkit
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# No network access is needed for local checks.
+RestrictAddressFamilies=AF_UNIX
+# Runs as root (to read the root-owned 0640 config) but with no capabilities at all.
+CapabilityBoundingSet=
+SystemCallArchitectures=native

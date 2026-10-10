@@ -1,0 +1,6 @@
+# Managed by Ansible (role ops_toolkit) - local edits are overwritten on the next run.
+# ops-toolkit configuration: KEY=VALUE, parsed (never sourced) by lib/common.sh.
+# Environment variables with the same name override these values.
+{% for key, value in ops_toolkit_config | dictsort %}
+{{ key }}={{ value }}
+{% endfor %}
