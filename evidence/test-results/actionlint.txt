@@ -1,0 +1,14 @@
+# actionlint
+# date: 2026-10-10T15:32:36Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release
+# cwd: /mnt/e/Devops/selise-devops-preparation/projects/linux-ops-toolkit
+# command: actionlint -verbose .github/workflows/ci.yml
+
+1.7.12
+installed by downloading from release page
+built with go1.26.1 compiler for linux/amd64
+verbose: Linting .github/workflows/ci.yml
+verbose: Found 0 parse errors in 8 ms for .github/workflows/ci.yml
+verbose: Rule "pyflakes" was disabled: exec: "pyflakes": executable file not found in $PATH
+verbose: Found total 0 errors in 166 ms for .github/workflows/ci.yml
+exit code: 0

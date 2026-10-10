@@ -1,0 +1,210 @@
+# ansible playbook test in a throwaway ubuntu:24.04 container
+# date: 2026-10-10T15:33:16Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; docker 29.8.1
+# command: ansible/test-in-docker.sh   (ANSIBLE_CORE_VERSION=2.21.4, ANSIBLE_LINT_VERSION=26.9.0)
+
+== start ubuntu:24.04 (repo mounted read-only at /src)
+debconf: delaying package configuration, since apt-utils is not installed
+ansible-playbook [core 2.21.4]
+== 1. syntax check
+
+playbook: ansible/site.yml
+== 2. first run
+
+PLAY [Install ops-toolkit] *****************************************************
+
+TASK [ops_toolkit : Install runtime dependencies] ******************************
+changed: [localhost]
+
+TASK [ops_toolkit : Create directories] ****************************************
+changed: [localhost] => (item={'path': '/opt/ops-toolkit', 'mode': '0755'})
+changed: [localhost] => (item={'path': '/opt/ops-toolkit/bin', 'mode': '0755'})
+changed: [localhost] => (item={'path': '/opt/ops-toolkit/lib', 'mode': '0755'})
+changed: [localhost] => (item={'path': '/opt/ops-toolkit/opsreport', 'mode': '0755'})
+changed: [localhost] => (item={'path': '/etc/ops-toolkit', 'mode': '0750'})
+changed: [localhost] => (item={'path': '/var/log/ops-toolkit', 'mode': '0750'})
+
+TASK [ops_toolkit : Install commands] ******************************************
+changed: [localhost] => (item=ops-backup)
+changed: [localhost] => (item=ops-health)
+changed: [localhost] => (item=ops-logclean)
+changed: [localhost] => (item=ops-netdiag)
+changed: [localhost] => (item=ops-report)
+changed: [localhost] => (item=ops-restore)
+changed: [localhost] => (item=ops-services)
+
+TASK [ops_toolkit : Install library, report module and README] *****************
+changed: [localhost] => (item=README.md)
+changed: [localhost] => (item=lib/common.sh)
+changed: [localhost] => (item=opsreport/__init__.py)
+changed: [localhost] => (item=opsreport/__main__.py)
+changed: [localhost] => (item=opsreport/report.py)
+
+TASK [ops_toolkit : Link commands into /usr/local/bin] *************************
+changed: [localhost] => (item=ops-backup)
+changed: [localhost] => (item=ops-health)
+changed: [localhost] => (item=ops-logclean)
+changed: [localhost] => (item=ops-netdiag)
+changed: [localhost] => (item=ops-report)
+changed: [localhost] => (item=ops-restore)
+changed: [localhost] => (item=ops-services)
+
+TASK [ops_toolkit : Render configuration (root-only, it may list internal hosts)] ***
+changed: [localhost]
+
+TASK [ops_toolkit : Install systemd units] *************************************
+skipping: [localhost] => (item=ops-health.service) 
+skipping: [localhost] => (item=ops-health.timer) 
+skipping: [localhost]
+
+TASK [ops_toolkit : Enable and start ops-health.timer] *************************
+skipping: [localhost]
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=6    changed=6    unreachable=0    failed=0    skipped=2    rescued=0    ignored=0   
+== 3. second run (idempotency: expect changed=0)
+
+PLAY [Install ops-toolkit] *****************************************************
+
+TASK [ops_toolkit : Install runtime dependencies] ******************************
+ok: [localhost]
+
+TASK [ops_toolkit : Create directories] ****************************************
+ok: [localhost] => (item={'path': '/opt/ops-toolkit', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/opt/ops-toolkit/bin', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/opt/ops-toolkit/lib', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/opt/ops-toolkit/opsreport', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/etc/ops-toolkit', 'mode': '0750'})
+ok: [localhost] => (item={'path': '/var/log/ops-toolkit', 'mode': '0750'})
+
+TASK [ops_toolkit : Install commands] ******************************************
+ok: [localhost] => (item=ops-backup)
+ok: [localhost] => (item=ops-health)
+ok: [localhost] => (item=ops-logclean)
+ok: [localhost] => (item=ops-netdiag)
+ok: [localhost] => (item=ops-report)
+ok: [localhost] => (item=ops-restore)
+ok: [localhost] => (item=ops-services)
+
+TASK [ops_toolkit : Install library, report module and README] *****************
+ok: [localhost] => (item=README.md)
+ok: [localhost] => (item=lib/common.sh)
+ok: [localhost] => (item=opsreport/__init__.py)
+ok: [localhost] => (item=opsreport/__main__.py)
+ok: [localhost] => (item=opsreport/report.py)
+
+TASK [ops_toolkit : Link commands into /usr/local/bin] *************************
+ok: [localhost] => (item=ops-backup)
+ok: [localhost] => (item=ops-health)
+ok: [localhost] => (item=ops-logclean)
+ok: [localhost] => (item=ops-netdiag)
+ok: [localhost] => (item=ops-report)
+ok: [localhost] => (item=ops-restore)
+ok: [localhost] => (item=ops-services)
+
+TASK [ops_toolkit : Render configuration (root-only, it may list internal hosts)] ***
+ok: [localhost]
+
+TASK [ops_toolkit : Install systemd units] *************************************
+skipping: [localhost] => (item=ops-health.service) 
+skipping: [localhost] => (item=ops-health.timer) 
+skipping: [localhost]
+
+TASK [ops_toolkit : Enable and start ops-health.timer] *************************
+skipping: [localhost]
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=6    changed=0    unreachable=0    failed=0    skipped=2    rescued=0    ignored=0   
+== 4. --check --diff (expect changed=0)
+
+PLAY [Install ops-toolkit] *****************************************************
+
+TASK [ops_toolkit : Install runtime dependencies] ******************************
+ok: [localhost]
+
+TASK [ops_toolkit : Create directories] ****************************************
+ok: [localhost] => (item={'path': '/opt/ops-toolkit', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/opt/ops-toolkit/bin', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/opt/ops-toolkit/lib', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/opt/ops-toolkit/opsreport', 'mode': '0755'})
+ok: [localhost] => (item={'path': '/etc/ops-toolkit', 'mode': '0750'})
+ok: [localhost] => (item={'path': '/var/log/ops-toolkit', 'mode': '0750'})
+
+TASK [ops_toolkit : Install commands] ******************************************
+ok: [localhost] => (item=ops-backup)
+ok: [localhost] => (item=ops-health)
+ok: [localhost] => (item=ops-logclean)
+ok: [localhost] => (item=ops-netdiag)
+ok: [localhost] => (item=ops-report)
+ok: [localhost] => (item=ops-restore)
+ok: [localhost] => (item=ops-services)
+
+TASK [ops_toolkit : Install library, report module and README] *****************
+ok: [localhost] => (item=README.md)
+ok: [localhost] => (item=lib/common.sh)
+ok: [localhost] => (item=opsreport/__init__.py)
+ok: [localhost] => (item=opsreport/__main__.py)
+ok: [localhost] => (item=opsreport/report.py)
+
+TASK [ops_toolkit : Link commands into /usr/local/bin] *************************
+ok: [localhost] => (item=ops-backup)
+ok: [localhost] => (item=ops-health)
+ok: [localhost] => (item=ops-logclean)
+ok: [localhost] => (item=ops-netdiag)
+ok: [localhost] => (item=ops-report)
+ok: [localhost] => (item=ops-restore)
+ok: [localhost] => (item=ops-services)
+
+TASK [ops_toolkit : Render configuration (root-only, it may list internal hosts)] ***
+ok: [localhost]
+
+TASK [ops_toolkit : Install systemd units] *************************************
+skipping: [localhost] => (item=ops-health.service) 
+skipping: [localhost] => (item=ops-health.timer) 
+skipping: [localhost]
+
+TASK [ops_toolkit : Enable and start ops-health.timer] *************************
+skipping: [localhost]
+
+PLAY RECAP *********************************************************************
+localhost                  : ok=6    changed=0    unreachable=0    failed=0    skipped=2    rescued=0    ignored=0   
+== 5. smoke test of the installed toolkit
+drwxr-x--- root:root /etc/ops-toolkit
+-rw-r----- root:root /etc/ops-toolkit/ops-toolkit.conf
+-rwxr-xr-x root:root /opt/ops-toolkit/bin/ops-health
+lrwxrwxrwx root:root /usr/local/bin/ops-health
+{"ts":"2026-10-10T15:35:00Z","level":"OK","tool":"ops-health","check":"cpu","host":"7fb52d45ad29","msg":"load1 1.04 on 12 cores = 9% of capacity","load1":1.04,"load5":4.03,"load15":4.18,"cores":12,"value":9,"unit":"%","warn":100,"crit":200,"busy_pct":2,"iowait_pct":0,"steal_pct":0,"top_cpu":"bash(4945) 0.9%, sleep(1) 0.0%, bash(4962) 0.0%, ps(4963) 0.0%"}
+{"ts":"2026-10-10T15:35:00Z","level":"OK","tool":"ops-health","check":"memory","host":"7fb52d45ad29","msg":"memory 19% used (8845 MiB of 10953 MiB available)","value":19,"unit":"%","warn":85,"crit":95,"total_mb":10953,"available_mb":8845,"top_mem":"bash(4945) 0.0%, ps(4967) 0.0%, bash(4966) 0.0%, sleep(1) 0.0%"}
+{"ts":"2026-10-10T15:35:00Z","level":"WARN","tool":"ops-health","check":"disk","host":"7fb52d45ad29","msg":"/ is 84% full (>= warn threshold 80%)","mount":"/","value":84,"unit":"%","warn":80,"crit":90,"threshold":80,"fstype":"overlay","source":"overlay","hint":"find what grew: du -xh --max-depth=1 / | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage"}
+{"ts":"2026-10-10T15:35:00Z","level":"OK","tool":"ops-health","check":"inode","host":"7fb52d45ad29","msg":"/ has 6% of its inodes in use","mount":"/","value":6,"unit":"%","warn":80,"crit":90,"fstype":"overlay","source":"overlay"}
+{"ts":"2026-10-10T15:35:00Z","level":"CRIT","tool":"ops-health","check":"disk","host":"7fb52d45ad29","msg":"/src is 91% full (>= crit threshold 90%)","mount":"/src","value":91,"unit":"%","warn":80,"crit":90,"threshold":90,"fstype":"9p","source":"E:\\","hint":"find what grew: du -xh --max-depth=1 /src | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage"}
+{"ts":"2026-10-10T15:35:00Z","level":"WARN","tool":"ops-health","check":"disk","host":"7fb52d45ad29","msg":"/etc/hosts is 84% full (>= warn threshold 80%)","mount":"/etc/hosts","value":84,"unit":"%","warn":80,"crit":90,"threshold":80,"fstype":"ext4","source":"/dev/sdd","hint":"find what grew: du -xh --max-depth=1 /etc/hosts | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage"}
+{"ts":"2026-10-10T15:35:00Z","level":"OK","tool":"ops-health","check":"inode","host":"7fb52d45ad29","msg":"/etc/hosts has 6% of its inodes in use","mount":"/etc/hosts","value":6,"unit":"%","warn":80,"crit":90,"fstype":"ext4","source":"/dev/sdd"}
+{"ts":"2026-10-10T15:35:00Z","level":"CRIT","tool":"ops-health","check":"summary","host":"7fb52d45ad29","msg":"ops-health CRITICAL: 1 critical, 2 warning, 0 unknown, 4 ok","crit_count":1,"warn_count":2,"unknown_count":0,"ok_count":4}
+ops-health exit code in container: 2
+events: 7  runs: 1  malformed lines: 0
+by level: CRIT=1  OK=4  WARN=2
+by check:
+  cpu     OK=1
+  disk    CRIT=1  WARN=2
+  inode   OK=2
+  memory  OK=1
+latest problems (newest first, max 10):
+  2026-10-10T15:35:00Z WARN    7fb52d45ad29 disk: /etc/hosts is 84% full (>= warn threshold 80%)
+      hint: find what grew: du -xh --max-depth=1 /etc/hosts | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage
+  2026-10-10T15:35:00Z CRIT    7fb52d45ad29 disk: /src is 91% full (>= crit threshold 90%)
+      hint: find what grew: du -xh --max-depth=1 /src | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage
+  2026-10-10T15:35:00Z WARN    7fb52d45ad29 disk: / is 84% full (>= warn threshold 80%)
+      hint: find what grew: du -xh --max-depth=1 / | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage
+overall: CRIT (exit 2)
+== 6. ansible-lint
+WARNING: PATH altered to include /opt/venv/bin, /opt/venv/bin :: This is usually a sign of broken local setup, which can cause unexpected behaviors.
+ansible-lint 26.9.0 using ansible-core:2.21.4 ansible-compat:26.9.0 ruamel-yaml:0.19.1
+WARNING: PATH altered to include /opt/venv/bin, /opt/venv/bin :: This is usually a sign of broken local setup, which can cause unexpected behaviors.
+
+Passed: 0 failure(s), 0 warning(s) in 3 files processed of 3 encountered. Last profile that met the validation criteria was 'production'.
+== result: first run changed=6, second run changed=0, check mode changed=0
+PASS: idempotent (second run and check mode report changed=0)
+exit code: 0
+
+# containers left behind (expect none):

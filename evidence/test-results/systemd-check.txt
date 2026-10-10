@@ -1,0 +1,63 @@
+# systemd unit validation
+# date: 2026-10-10T15:32:36Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release
+# cwd: /mnt/e/Devops/selise-devops-preparation/projects/linux-ops-toolkit
+# command: tests/systemd-check.sh --transient
+
+== systemd-analyze verify (systemd 255)
+verify: OK
+== systemd-analyze calendar (timer schedule)
+  Original form: *:0/5
+Normalized form: *-*-* *:00/5:00
+    Next elapse: Sat 2026-10-10 21:35:00 +06
+       (in UTC): Sat 2026-10-10 15:35:00 UTC
+       From now: 2min 23s left
+   Iteration #2: Sat 2026-10-10 21:40:00 +06
+       (in UTC): Sat 2026-10-10 15:40:00 UTC
+       From now: 7min left
+   Iteration #3: Sat 2026-10-10 21:45:00 +06
+       (in UTC): Sat 2026-10-10 15:45:00 UTC
+       From now: 12min left
+== systemd-analyze security --offline (exposure score of the service sandbox)
+→ Overall exposure level for ops-health.service: 3.2 OK 🙂
+== transient run with the unit's [Service] settings
+  Environment=OPS_CONFIG=/etc/ops-toolkit/ops-toolkit.conf
+  Environment=OPS_LOG_DIR=/var/log/ops-toolkit
+  SuccessExitStatus=1
+  TimeoutStartSec=120
+  Nice=10
+  LogsDirectory=ops-toolkit
+  LogsDirectoryMode=0750
+  NoNewPrivileges=yes
+  ProtectSystem=strict
+  ReadWritePaths=/var/log/ops-toolkit
+  ProtectHome=read-only
+  PrivateTmp=yes
+  PrivateDevices=yes
+  ProtectKernelTunables=yes
+  ProtectKernelModules=yes
+  ProtectKernelLogs=yes
+  ProtectControlGroups=yes
+  ProtectClock=yes
+  ProtectHostname=yes
+  RestrictSUIDSGID=yes
+  RestrictRealtime=yes
+  RestrictNamespaces=yes
+  LockPersonality=yes
+  RestrictAddressFamilies=AF_UNIX
+  CapabilityBoundingSet=
+  SystemCallArchitectures=native
+  Environment=OPS_CONFIG=/mnt/e/Devops/selise-devops-preparation/projects/linux-ops-toolkit/config/ops-toolkit.conf.example
+  Environment=OPS_DISK_MOUNTS=/
+{"ts":"2026-10-10T15:32:38Z","level":"OK","tool":"ops-health","check":"cpu","host":"BABAYAGA","msg":"load1 3.18 on 12 cores = 27% of capacity","load1":3.18,"load5":6.15,"load15":4.78,"cores":12,"value":27,"unit":"%","warn":100,"crit":200,"busy_pct":3,"iowait_pct":0,"steal_pct":0,"top_cpu":"kube-apiserver(3175) 41.2%, uvicorn(20580) 34.2%, grafana(1086) 24.2%, kubelet(2599) 14.2%, etcd(3194) 13.1%"}
+{"ts":"2026-10-10T15:32:38Z","level":"OK","tool":"ops-health","check":"memory","host":"BABAYAGA","msg":"memory 19% used (8822 MiB of 10953 MiB available)","value":19,"unit":"%","warn":85,"crit":95,"total_mb":10953,"available_mb":8822,"top_mem":"grafana(1086) 2.9%, kube-apiserver(3175) 2.8%, prometheus(1188) 1.0%, kube-controller(3201) 1.0%, dockerd(310) 1.0%"}
+{"ts":"2026-10-10T15:32:38Z","level":"WARN","tool":"ops-health","check":"disk","host":"BABAYAGA","msg":"/ is 84% full (>= warn threshold 80%)","mount":"/","value":84,"unit":"%","warn":80,"crit":90,"threshold":80,"fstype":"ext4","source":"/dev/sdd","hint":"find what grew: du -xh --max-depth=1 / | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage"}
+{"ts":"2026-10-10T15:32:38Z","level":"OK","tool":"ops-health","check":"inode","host":"BABAYAGA","msg":"/ has 6% of its inodes in use","mount":"/","value":6,"unit":"%","warn":80,"crit":90,"fstype":"ext4","source":"/dev/sdd"}
+{"ts":"2026-10-10T15:32:38Z","level":"WARN","tool":"ops-health","check":"summary","host":"BABAYAGA","msg":"ops-health WARNING: 0 critical, 1 warning, 0 unknown, 3 ok","crit_count":0,"warn_count":1,"unknown_count":0,"ok_count":3}
+transient unit exit status: 0
+log file written inside the sandbox:
+drwxr-x--- 2 root root 4096 Oct 10 21:32 /var/log/ops-toolkit
+{"ts":"2026-10-10T15:32:38Z","level":"WARN","tool":"ops-health","check":"summary","host":"BABAYAGA","msg":"ops-health WARNING: 0 critical, 1 warning, 0 unknown, 3 ok","crit_count":0,"warn_count":1,"unknown_count":0,"ok_count":3}
+transient unit ops-health-transient-test-20743.service is gone (collected)
+removed /var/log/ops-toolkit created by this test
+exit code: 0

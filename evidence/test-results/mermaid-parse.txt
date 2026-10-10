@@ -1,0 +1,14 @@
+# Mermaid syntax check (mermaid 11.4.1 parser under Node v24.12.0 + jsdom 25.0.1, run on the Windows host)
+# date: 2026-10-10T15:35:22Z
+# command: node check.mjs <file>  (check.mjs calls mermaid.parse(); a deliberately broken diagram is parsed as a negative control)
+
+mermaid 11.4.1 parse OK: E:/Devops/selise-devops-preparation/evidence/architecture-diagrams/linux-ops-toolkit.mmd (diagramType=flowchart-v2)
+exit code: 0
+mermaid 11.4.1 parse OK: readme-block.mmd (diagramType=flowchart-v2)
+exit code: 0 (README mermaid block)
+README block is identical to evidence/architecture-diagrams/linux-ops-toolkit.mmd
+--- negative control
+parse FAILED: bad.mmd
+Parse error on line 4:
+...t LR  a -->|bad b
+exit code: 1

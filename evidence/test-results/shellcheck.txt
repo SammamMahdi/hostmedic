@@ -1,0 +1,15 @@
+# shellcheck
+# date: 2026-10-10T15:32:34Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release
+# cwd: /mnt/e/Devops/selise-devops-preparation/projects/linux-ops-toolkit
+# command: shellcheck -x bin/ops-* lib/common.sh tests/systemd-check.sh ansible/test-in-docker.sh
+
+ShellCheck - shell script analysis tool
+version: 0.9.0
+license: GNU General Public License, version 3
+website: https://www.shellcheck.net
+exit code: 0 (no output above = zero findings)
+
+# inline disables (each has a justification comment):
+lib/common.sh:341:  # shellcheck disable=SC2016 # $1/$2 are expanded by the inner bash, on purpose
+lib/common.sh:371:# shellcheck disable=SC2034 # OPS_HTTP_CODE/OPS_HTTP_RC/OPS_PROBE_MS are outputs read by the caller

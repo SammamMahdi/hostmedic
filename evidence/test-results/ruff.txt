@@ -1,0 +1,11 @@
+# ruff
+# date: 2026-10-10T15:32:36Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release
+# cwd: /mnt/e/Devops/selise-devops-preparation/projects/linux-ops-toolkit
+# command: ruff check . && ruff format --check .
+
+ruff 0.16.9
+All checks passed!
+ruff check exit code: 0
+16 files already formatted
+ruff format --check exit code: 0

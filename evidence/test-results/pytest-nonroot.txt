@@ -1,0 +1,10 @@
+# pytest as the unprivileged user 'nobody' (uid 65534) instead of root
+# date: 2026-10-10T15:32:57Z
+# command: setpriv --reuid=nobody --regid=nogroup --clear-groups ... python -m pytest -q
+
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+........................................................................ [ 46%]
+........................................................................ [ 92%]
+...........                                                              [100%]
+155 passed in 12.08s
+exit code: 0

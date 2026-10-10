@@ -1,0 +1,13 @@
+# ops-netdiag against a non-existent domain (.invalid is reserved by RFC 2606 and never resolves)
+# date: 2026-10-10T15:32:50Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release; curl 8.5.0
+# env: OPS_CONFIG=/dev/null OPS_LOG_DIR=/tmp/ops-toolkit-demo.1V1AVs/log
+
+$ ops-netdiag ops-toolkit-demo.invalid 443
+{"ts":"2026-10-10T15:32:50Z","level":"OK","tool":"ops-netdiag","check":"resolver","host":"BABAYAGA","msg":"nameservers: 10.255.255.254","nameservers":"10.255.255.254","nsswitch_hosts":"files dns"}
+{"ts":"2026-10-10T15:32:50Z","level":"CRIT","tool":"ops-netdiag","check":"dns","host":"BABAYAGA","msg":"DNS failed for ops-toolkit-demo.invalid: no address found (NXDOMAIN or no A/AAAA record)","getent_exit":2,"resolve_ms":61,"hint":"check the name for typos; check /etc/resolv.conf and 'resolvectl status'; ask the resolver directly: 'resolvectl query ops-toolkit-demo.invalid' or 'dig ops-toolkit-demo.invalid'; compare with a public resolver: 'dig ops-toolkit-demo.invalid @1.1.1.1'; check the 'hosts:' line in /etc/nsswitch.conf and /etc/hosts"}
+{"ts":"2026-10-10T15:32:50Z","level":"OK","tool":"ops-netdiag","check":"route","host":"BABAYAGA","msg":"default via 172.26.208.1 dev eth0","default_route":"default via 172.26.208.1 dev eth0"}
+{"ts":"2026-10-10T15:32:50Z","level":"UNKNOWN","tool":"ops-netdiag","check":"tcp","host":"BABAYAGA","msg":"skipped: ops-toolkit-demo.invalid did not resolve","target":"ops-toolkit-demo.invalid:443"}
+{"ts":"2026-10-10T15:32:50Z","level":"CRIT","tool":"ops-netdiag","check":"summary","host":"BABAYAGA","msg":"ops-netdiag CRITICAL: 1 critical, 0 warning, 1 unknown, 2 ok","crit_count":1,"warn_count":0,"unknown_count":1,"ok_count":2}
+[exit code: 2]
+

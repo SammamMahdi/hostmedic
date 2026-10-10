@@ -1,0 +1,54 @@
+# ops-logclean demo (dry-run, then --apply, then refusal of dangerous directories)
+# date: 2026-10-10T15:32:53Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release; curl 8.5.0
+# env: OPS_CONFIG=/dev/null OPS_LOG_DIR=/tmp/ops-toolkit-demo.1V1AVs/log
+
+$ find /tmp/ops-toolkit-demo.1V1AVs/applogs /tmp/ops-toolkit-demo.1V1AVs/outside -printf %M\ %TY-%Tm-%Td\ %p\ -\>\ %l\\n
+drwxr-xr-x 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/applogs -> 
+-rw-r--r-- 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/applogs/current.log -> 
+lrwxrwxrwx 2026-08-26 /tmp/ops-toolkit-demo.1V1AVs/applogs/link-to-outside.log -> /tmp/ops-toolkit-demo.1V1AVs/outside/victim.log
+-rw-r--r-- 2026-08-26 /tmp/ops-toolkit-demo.1V1AVs/applogs/ancient.log.gz -> 
+drwxr-xr-x 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/applogs/nested -> 
+-rw-r--r-- 2026-09-30 /tmp/ops-toolkit-demo.1V1AVs/applogs/nested/worker.log -> 
+-rw-r--r-- 2026-09-30 /tmp/ops-toolkit-demo.1V1AVs/applogs/old.log -> 
+drwxr-xr-x 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/outside -> 
+-rw-r--r-- 2026-08-26 /tmp/ops-toolkit-demo.1V1AVs/outside/victim.log -> 
+[exit code: 0]
+
+$ ops-logclean
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"would delete /tmp/ops-toolkit-demo.1V1AVs/applogs/ancient.log.gz","file":"/tmp/ops-toolkit-demo.1V1AVs/applogs/ancient.log.gz","age_days":45,"size_bytes":11115,"mode":"dry-run"}
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"would compress /tmp/ops-toolkit-demo.1V1AVs/applogs/nested/worker.log","file":"/tmp/ops-toolkit-demo.1V1AVs/applogs/nested/worker.log","age_days":10,"size_bytes":108894,"mode":"dry-run"}
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"would compress /tmp/ops-toolkit-demo.1V1AVs/applogs/old.log","file":"/tmp/ops-toolkit-demo.1V1AVs/applogs/old.log","age_days":10,"size_bytes":108894,"mode":"dry-run"}
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"dry-run in /tmp/ops-toolkit-demo.1V1AVs/applogs: would delete 1 file(s) (11115 bytes), would compress 2 file(s); nothing changed - re-run with --apply to act","dir":"/tmp/ops-toolkit-demo.1V1AVs/applogs","delete_count":1,"compress_count":2,"delete_bytes":11115,"mode":"dry-run"}
+[exit code: 0]
+
+$ ops-logclean --apply
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"deleted /tmp/ops-toolkit-demo.1V1AVs/applogs/ancient.log.gz","file":"/tmp/ops-toolkit-demo.1V1AVs/applogs/ancient.log.gz","age_days":45,"size_bytes":11115,"mode":"apply"}
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"compressed /tmp/ops-toolkit-demo.1V1AVs/applogs/nested/worker.log","file":"/tmp/ops-toolkit-demo.1V1AVs/applogs/nested/worker.log","age_days":10,"size_bytes":108894,"mode":"apply"}
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"compressed /tmp/ops-toolkit-demo.1V1AVs/applogs/old.log","file":"/tmp/ops-toolkit-demo.1V1AVs/applogs/old.log","age_days":10,"size_bytes":108894,"mode":"apply"}
+{"ts":"2026-10-10T15:32:53Z","level":"INFO","tool":"ops-logclean","check":"logclean","host":"BABAYAGA","msg":"apply in /tmp/ops-toolkit-demo.1V1AVs/applogs: deleted 1 file(s) (11115 bytes), compressed 2 file(s)","dir":"/tmp/ops-toolkit-demo.1V1AVs/applogs","delete_count":1,"compress_count":2,"delete_bytes":11115,"mode":"apply"}
+[exit code: 0]
+
+$ find /tmp/ops-toolkit-demo.1V1AVs/applogs /tmp/ops-toolkit-demo.1V1AVs/outside -printf %M\ %TY-%Tm-%Td\ %p\ -\>\ %l\\n
+drwxr-xr-x 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/applogs -> 
+-rw-r--r-- 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/applogs/current.log -> 
+-rw-r--r-- 2026-09-30 /tmp/ops-toolkit-demo.1V1AVs/applogs/old.log.gz -> 
+lrwxrwxrwx 2026-08-26 /tmp/ops-toolkit-demo.1V1AVs/applogs/link-to-outside.log -> /tmp/ops-toolkit-demo.1V1AVs/outside/victim.log
+drwxr-xr-x 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/applogs/nested -> 
+-rw-r--r-- 2026-09-30 /tmp/ops-toolkit-demo.1V1AVs/applogs/nested/worker.log.gz -> 
+drwxr-xr-x 2026-10-10 /tmp/ops-toolkit-demo.1V1AVs/outside -> 
+-rw-r--r-- 2026-08-26 /tmp/ops-toolkit-demo.1V1AVs/outside/victim.log -> 
+[exit code: 0]
+
+$ env OPS_LOGCLEAN_DIR=/ ops-logclean --apply
+ops-logclean: error: refusing to clean / (resolved from /): root, system directory or home
+ops-logclean: hint: point OPS_LOGCLEAN_DIR at one application's log directory
+{"ts":"2026-10-10T15:32:53Z","level":"ERROR","tool":"ops-logclean","check":"ops-logclean","host":"BABAYAGA","msg":"refusing to clean / (resolved from /): root, system directory or home","hint":"point OPS_LOGCLEAN_DIR at one application's log directory"}
+[exit code: 1]
+
+$ env OPS_LOGCLEAN_DIR=/etc ops-logclean --apply
+ops-logclean: error: refusing to clean /etc (resolved from /etc): root, system directory or home
+ops-logclean: hint: point OPS_LOGCLEAN_DIR at one application's log directory
+{"ts":"2026-10-10T15:32:53Z","level":"ERROR","tool":"ops-logclean","check":"ops-logclean","host":"BABAYAGA","msg":"refusing to clean /etc (resolved from /etc): root, system directory or home","hint":"point OPS_LOGCLEAN_DIR at one application's log directory"}
+[exit code: 1]
+

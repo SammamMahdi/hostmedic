@@ -1,0 +1,14 @@
+# ops-netdiag against github.com (DNS, route, TCP 443, HTTPS status)
+# date: 2026-10-10T15:32:44Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release; curl 8.5.0
+# env: OPS_CONFIG=/dev/null OPS_LOG_DIR=/tmp/ops-toolkit-demo.1V1AVs/log
+
+$ ops-netdiag --http github.com 443
+{"ts":"2026-10-10T15:32:44Z","level":"OK","tool":"ops-netdiag","check":"resolver","host":"BABAYAGA","msg":"nameservers: 10.255.255.254","nameservers":"10.255.255.254","nsswitch_hosts":"files dns"}
+{"ts":"2026-10-10T15:32:45Z","level":"OK","tool":"ops-netdiag","check":"dns","host":"BABAYAGA","msg":"github.com resolves to 20.205.243.166 (61 ms)","addresses":"20.205.243.166","resolve_ms":61}
+{"ts":"2026-10-10T15:32:45Z","level":"OK","tool":"ops-netdiag","check":"route","host":"BABAYAGA","msg":"route to 20.205.243.166: 20.205.243.166 via 172.26.208.1 dev eth0 src 172.26.215.179","default_route":"default via 172.26.208.1 dev eth0","path":"20.205.243.166 via 172.26.208.1 dev eth0 src 172.26.215.179"}
+{"ts":"2026-10-10T15:32:45Z","level":"OK","tool":"ops-netdiag","check":"tcp","host":"BABAYAGA","msg":"connected to github.com:443 in 153 ms","target":"github.com:443","connect_ms":153}
+{"ts":"2026-10-10T15:32:50Z","level":"OK","tool":"ops-netdiag","check":"http","host":"BABAYAGA","msg":"https://github.com:443/ returned 200 (5013 ms)","target":"https://github.com:443/","value":200,"response_ms":5013}
+{"ts":"2026-10-10T15:32:50Z","level":"OK","tool":"ops-netdiag","check":"summary","host":"BABAYAGA","msg":"ops-netdiag OK: 0 critical, 0 warning, 0 unknown, 5 ok","crit_count":0,"warn_count":0,"unknown_count":0,"ok_count":5}
+[exit code: 0]
+

@@ -1,0 +1,17 @@
+# ops-services against real local services
+# date: 2026-10-10T15:32:44Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release; curl 8.5.0
+# env: OPS_CONFIG=/dev/null OPS_LOG_DIR=/tmp/ops-toolkit-demo.1V1AVs/log
+
+# cron.service exists on this host; nginx.service is not installed (systemd reports inactive).
+# 127.0.0.1:18080 is a tiny Python app: / -> 200, /healthz -> 503. Nothing listens on 127.0.0.1:18081.
+$ env OPS_SYSTEMD_UNITS=cron.service\ nginx.service OPS_TCP_CHECKS=127.0.0.1:18080\ 127.0.0.1:18081 OPS_HTTP_CHECKS=http://127.0.0.1:18080/\|200\ http://127.0.0.1:18080/healthz\|200 ops-services
+{"ts":"2026-10-10T15:32:44Z","level":"OK","tool":"ops-services","check":"systemd","host":"BABAYAGA","msg":"cron.service is active","unit":"cron.service","state":"active"}
+{"ts":"2026-10-10T15:32:44Z","level":"CRIT","tool":"ops-services","check":"systemd","host":"BABAYAGA","msg":"nginx.service is inactive (expected active)","unit":"nginx.service","state":"inactive","hint":"see why: systemctl status nginx.service --no-pager; journalctl -u nginx.service -n 50 --no-pager; after fixing: sudo systemctl restart nginx.service"}
+{"ts":"2026-10-10T15:32:44Z","level":"OK","tool":"ops-services","check":"tcp","host":"BABAYAGA","msg":"127.0.0.1:18080 accepts connections (5 ms)","target":"127.0.0.1:18080","result":"open","connect_ms":5}
+{"ts":"2026-10-10T15:32:44Z","level":"CRIT","tool":"ops-services","check":"tcp","host":"BABAYAGA","msg":"127.0.0.1:18081 is not reachable: refused","target":"127.0.0.1:18081","result":"refused","timeout_s":5,"hint":"host answered but nothing listens on port 18081: on 127.0.0.1 run 'ss -ltnp \"sport = :18081\"' and check the service with 'systemctl status <unit>'"}
+{"ts":"2026-10-10T15:32:44Z","level":"OK","tool":"ops-services","check":"http","host":"BABAYAGA","msg":"http://127.0.0.1:18080/ returned 200 (6 ms)","target":"http://127.0.0.1:18080/","value":200,"expected":200,"response_ms":6}
+{"ts":"2026-10-10T15:32:44Z","level":"CRIT","tool":"ops-services","check":"http","host":"BABAYAGA","msg":"http://127.0.0.1:18080/healthz returned 503, expected 200","target":"http://127.0.0.1:18080/healthz","value":503,"expected":200,"response_ms":6,"hint":"the server answered but the application failed: check its logs (journalctl -u <unit>, docker logs <container>) and its dependencies (database, upstream APIs); reproduce with: curl -sv http://127.0.0.1:18080/healthz"}
+{"ts":"2026-10-10T15:32:44Z","level":"CRIT","tool":"ops-services","check":"summary","host":"BABAYAGA","msg":"ops-services CRITICAL: 3 critical, 0 warning, 0 unknown, 3 ok","crit_count":3,"warn_count":0,"unknown_count":0,"ok_count":3}
+[exit code: 2]
+

@@ -1,0 +1,77 @@
+# ops-report over the JSON log written by all demo runs above
+# date: 2026-10-10T15:32:53Z
+# host: Linux 6.6.87.2-microsoft-standard-WSL2 x86_64; Ubuntu 24.04.4 LTS; bash 5.2.21(1)-release; curl 8.5.0
+# env: OPS_CONFIG=/dev/null OPS_LOG_DIR=/tmp/ops-toolkit-demo.1V1AVs/log
+
+$ ops-report /tmp/ops-toolkit-demo.1V1AVs/log/ops-toolkit.jsonl
+events: 86  runs: 9  malformed lines: 0
+by level: CRIT=19  ERROR=7  INFO=16  OK=38  UNKNOWN=1  WARN=5
+by check:
+  backup        INFO=4
+  cpu           OK=5
+  disk          CRIT=12  OK=7  WARN=4
+  dns           CRIT=1  OK=1
+  http          CRIT=2  OK=3
+  inode         OK=8
+  logclean      INFO=8
+  memory        OK=5
+  ops-backup    ERROR=2
+  ops-logclean  ERROR=2
+  ops-restore   ERROR=3
+  resolver      OK=2
+  restore       INFO=4  WARN=1
+  route         OK=2
+  systemd       CRIT=2  OK=2
+  tcp           CRIT=2  OK=3  UNKNOWN=1
+latest problems (newest first, max 10):
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-logclean: refusing to clean /etc (resolved from /etc): root, system directory or home
+      hint: point OPS_LOGCLEAN_DIR at one application's log directory
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-logclean: refusing to clean / (resolved from /): root, system directory or home
+      hint: point OPS_LOGCLEAN_DIR at one application's log directory
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-restore: refusing to restore into / (root, system directory or home)
+      hint: restore into a new directory, e.g. /root/restore-$(date +%F), and copy what you need
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-backup: destination /tmp/ops-toolkit-demo.1V1AVs/srv/app/backups is inside source /tmp/ops-toolkit-demo.1V1AVs/srv/app: the backup would include itself
+      hint: choose an OPS_BACKUP_DEST outside every source
+  2026-10-10T15:32:52Z ERROR   BABAYAGA ops-backup: refusing to back up '/' (the whole root or a pseudo filesystem)
+      hint: list the directories you need, e.g. /etc /srv/app
+  2026-10-10T15:32:52Z ERROR   BABAYAGA ops-restore: checksum mismatch for /tmp/ops-toolkit-demo.1V1AVs/tampered.tar.gz (expected 706ce82c3c4590400d46848169d1e3491ac216b868637e6d54fbf983650e2562, got 6060accfeffd68a323f48e28c89c02942406fa712fd29d0c1afebea1016275b7): the archive is corrupt or was modified; refusing to restore
+      hint: use another backup; compare with off-host copies of the .sha256 file
+  2026-10-10T15:32:52Z WARN    BABAYAGA restore: restoring into non-empty /tmp/ops-toolkit-demo.1V1AVs/restore (--force): files with the same names will be replaced
+  2026-10-10T15:32:52Z ERROR   BABAYAGA ops-restore: target /tmp/ops-toolkit-demo.1V1AVs/restore is not empty; refusing to overwrite existing files
+      hint: restore into an empty directory, or re-run with --force
+  2026-10-10T15:32:50Z UNKNOWN BABAYAGA tcp: skipped: ops-toolkit-demo.invalid did not resolve
+  2026-10-10T15:32:50Z CRIT    BABAYAGA dns: DNS failed for ops-toolkit-demo.invalid: no address found (NXDOMAIN or no A/AAAA record)
+      hint: check the name for typos; check /etc/resolv.conf and 'resolvectl status'; ask the resolver directly: 'resolvectl query ops-toolkit-demo.invalid' or 'dig ops-toolkit-demo.invalid'; compare with a public resolver: 'dig ops-toolkit-demo.invalid @1.1.1.1'; check the 'hosts:' line in /etc/nsswitch.conf and /etc/hosts
+overall: CRIT (exit 2)
+[exit code: 2]
+
+$ ops-report --since 1h --limit 3 /tmp/ops-toolkit-demo.1V1AVs/log/ops-toolkit.jsonl
+events: 86  runs: 9  malformed lines: 0
+by level: CRIT=19  ERROR=7  INFO=16  OK=38  UNKNOWN=1  WARN=5
+by check:
+  backup        INFO=4
+  cpu           OK=5
+  disk          CRIT=12  OK=7  WARN=4
+  dns           CRIT=1  OK=1
+  http          CRIT=2  OK=3
+  inode         OK=8
+  logclean      INFO=8
+  memory        OK=5
+  ops-backup    ERROR=2
+  ops-logclean  ERROR=2
+  ops-restore   ERROR=3
+  resolver      OK=2
+  restore       INFO=4  WARN=1
+  route         OK=2
+  systemd       CRIT=2  OK=2
+  tcp           CRIT=2  OK=3  UNKNOWN=1
+latest problems (newest first, max 3):
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-logclean: refusing to clean /etc (resolved from /etc): root, system directory or home
+      hint: point OPS_LOGCLEAN_DIR at one application's log directory
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-logclean: refusing to clean / (resolved from /): root, system directory or home
+      hint: point OPS_LOGCLEAN_DIR at one application's log directory
+  2026-10-10T15:32:53Z ERROR   BABAYAGA ops-restore: refusing to restore into / (root, system directory or home)
+      hint: restore into a new directory, e.g. /root/restore-$(date +%F), and copy what you need
+overall: CRIT (exit 2)
+[exit code: 2]
+
