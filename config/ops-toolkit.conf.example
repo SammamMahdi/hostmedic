@@ -1,0 +1,64 @@
+# ops-toolkit configuration - copy to /etc/ops-toolkit/ops-toolkit.conf (root:root, 0640)
+# or point OPS_CONFIG at another file.
+#
+# Format: KEY=VALUE, one per line. Lines starting with # are comments.
+#
+# This file is PARSED, never `source`d. Only lines matching ^[A-Z_][A-Z0-9_]*= are read,
+# only the keys listed below are accepted, and values are taken literally: no $VARS,
+# no $(commands), no backticks, no inline comments. One pair of surrounding quotes is
+# stripped. Sourcing a config file would execute any shell code in it with the rights of
+# whoever runs the tool - via the systemd timer that is root - so anyone able to edit
+# the config would effectively get a root shell.
+#
+# Precedence: environment variable > this file > built-in default. Example:
+#   OPS_DISK_CRIT=95 ops-health
+# Lists are space-separated. Remove or comment out a line to get the built-in default.
+
+# --- logging -----------------------------------------------------------------
+# JSON-lines log: $OPS_LOG_DIR/ops-toolkit.jsonl
+# Empty or unset: /var/log/ops-toolkit as root, else ${XDG_STATE_HOME:-~/.local/state}/ops-toolkit
+OPS_LOG_DIR=/var/log/ops-toolkit
+
+# --- ops-health thresholds (a value >= threshold triggers WARN/CRIT) ---------------
+# 1-minute load average as a percentage of CPU cores (100 = every core busy).
+OPS_LOAD_WARN=100
+OPS_LOAD_CRIT=200
+# Memory used in %, computed from MemAvailable (reclaimable page cache counts as free).
+OPS_MEM_WARN=85
+OPS_MEM_CRIT=95
+# Disk space and inodes used in %, per mounted filesystem.
+OPS_DISK_WARN=80
+OPS_DISK_CRIT=90
+OPS_INODE_WARN=80
+OPS_INODE_CRIT=90
+# Mount points to check; empty = every mounted filesystem except the types below.
+OPS_DISK_MOUNTS=
+OPS_DISK_EXCLUDE_TYPES="tmpfs devtmpfs squashfs overlay efivarfs ramfs"
+# How many top CPU / memory processes to include in events.
+OPS_TOP_N=5
+# Seconds to sample /proc/stat for busy/iowait/steal %; 0 disables the sample.
+OPS_CPU_SAMPLE_SECS=1
+
+# --- ops-services ----------------------------------------------------------------
+# systemd units that must be "active".
+OPS_SYSTEMD_UNITS="ssh.service cron.service"
+# host:port pairs that must accept a TCP connection ([ipv6]:port for IPv6).
+OPS_TCP_CHECKS="127.0.0.1:22"
+# URL|expected-status (default 200). Redirects are not followed; only http/https.
+OPS_HTTP_CHECKS=
+# Per-check timeouts in seconds, at least 1 (also used by ops-netdiag).
+OPS_CONNECT_TIMEOUT=5
+OPS_HTTP_TIMEOUT=10
+
+# --- ops-backup / ops-restore -----------------------------------------------------
+# Absolute directories to archive (paths containing spaces are not supported).
+OPS_BACKUP_SOURCES="/etc/ops-toolkit"
+OPS_BACKUP_DEST=/var/backups/ops-toolkit
+OPS_BACKUP_KEEP=7
+
+# --- ops-logclean -----------------------------------------------------------------
+# One application's log directory, e.g. /var/log/myapp. '/', system directories, /var/log
+# itself (logrotate's job) and home directories are refused.
+OPS_LOGCLEAN_DIR=
+OPS_LOGCLEAN_COMPRESS_DAYS=7
+OPS_LOGCLEAN_DELETE_DAYS=30

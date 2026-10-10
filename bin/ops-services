@@ -1,0 +1,145 @@
+#!/usr/bin/env bash
+# ops-services - service availability checks (systemd unit, TCP port, HTTP status) from config.
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=lib/common.sh
+source "$OPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ops-services [--help]
+
+Runs the service checks listed in the config file (or environment) and prints
+one JSON event per check (also appended to $OPS_LOG_DIR/ops-toolkit.jsonl).
+
+  OPS_SYSTEMD_UNITS    units that must be active      e.g. "ssh.service cron.service"
+  OPS_TCP_CHECKS       host:port that must accept TCP  e.g. "127.0.0.1:22 [::1]:5432"
+  OPS_HTTP_CHECKS      URL|expected-status             e.g. "http://127.0.0.1:8080/healthz|200"
+                       (expected status defaults to 200; redirects are not followed)
+  OPS_CONNECT_TIMEOUT  seconds per TCP connect          (default 5)
+  OPS_HTTP_TIMEOUT     seconds per HTTP request         (default 10)
+
+Exit codes: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN (worst result wins), 64 usage error.
+EOF
+}
+
+check_systemd_units() {
+  local -a units
+  local unit state
+  read -r -a units <<<"$OPS_SYSTEMD_UNITS"
+  for unit in "${units[@]}"; do
+    if [[ ! $unit =~ ^[A-Za-z0-9_][A-Za-z0-9@._:-]*$ ]]; then
+      ops_status UNKNOWN systemd "invalid unit name '$unit' in OPS_SYSTEMD_UNITS" "unit=$unit"
+      continue
+    fi
+    if ! command -v systemctl >/dev/null 2>&1; then
+      ops_status UNKNOWN systemd "systemctl not found; cannot check $unit" "unit=$unit" \
+        hint="this host (or container) does not run systemd; remove OPS_SYSTEMD_UNITS or check the process with 'pgrep -a <name>'"
+      continue
+    fi
+    # is-active prints the state and exits non-zero unless it is "active".
+    state=$(systemctl is-active "$unit" 2>/dev/null) || true
+    state=${state%%$'\n'*}
+    case $state in
+      active)
+        ops_status OK systemd "$unit is active" "unit=$unit" "state=$state" ;;
+      activating | reloading | refreshing)
+        ops_status WARN systemd "$unit is $state" "unit=$unit" "state=$state" \
+          hint="re-check in a minute; if it stays $state see 'systemctl status $unit --no-pager' and 'journalctl -u $unit -n 50 --no-pager'" ;;
+      inactive | failed | deactivating)
+        ops_status CRIT systemd "$unit is $state (expected active)" "unit=$unit" "state=$state" \
+          hint="see why: systemctl status $unit --no-pager; journalctl -u $unit -n 50 --no-pager; after fixing: sudo systemctl restart $unit" ;;
+      *)
+        ops_status UNKNOWN systemd "could not get state of $unit (got '${state}')" "unit=$unit" "state=${state}" \
+          hint="run 'systemctl is-active $unit' manually; is systemd running ('systemctl is-system-running')?" ;;
+    esac
+  done
+}
+
+check_tcp() {
+  local -a entries
+  local entry host port target
+  read -r -a entries <<<"$OPS_TCP_CHECKS"
+  for entry in "${entries[@]}"; do
+    if [[ $entry =~ ^\[([0-9A-Fa-f:.]+)\]:([1-9][0-9]{0,4})$ || $entry =~ ^([A-Za-z0-9][A-Za-z0-9._-]*):([1-9][0-9]{0,4})$ ]]; then
+      host=${BASH_REMATCH[1]}
+      port=${BASH_REMATCH[2]}
+    else
+      ops_status UNKNOWN tcp "invalid TCP check '$entry' (expected host:port or [ipv6]:port)" "target=$entry"
+      continue
+    fi
+    if ((port < 1 || port > 65535)); then
+      ops_status UNKNOWN tcp "invalid port in '$entry'" "target=$entry"
+      continue
+    fi
+    target="$host:$port"
+    ops_tcp_probe "$host" "$port" "$OPS_CONNECT_TIMEOUT"
+    if [[ $REPLY == open ]]; then
+      ops_status OK tcp "$target accepts connections (${OPS_PROBE_MS} ms)" "target=$target" "result=open" "connect_ms=$OPS_PROBE_MS"
+    else
+      local reason=$REPLY
+      ops_tcp_hint "$reason" "$host" "$port"
+      ops_status CRIT tcp "$target is not reachable: $reason" "target=$target" "result=$reason" \
+        "timeout_s=$OPS_CONNECT_TIMEOUT" "hint=$REPLY"
+    fi
+  done
+}
+
+check_http() {
+  local -a entries
+  local entry url expect host
+  read -r -a entries <<<"$OPS_HTTP_CHECKS"
+  for entry in "${entries[@]}"; do
+    url=${entry%|*}
+    expect=200
+    if [[ $entry == *"|"* ]]; then expect=${entry##*|}; fi
+    if [[ ! $url =~ ^https?://[^[:space:]]+$ || ! $expect =~ ^[1-5][0-9][0-9]$ ]]; then
+      ops_status UNKNOWN http "invalid HTTP check '$entry' (expected URL|status, http or https)" "target=$entry"
+      continue
+    fi
+    host=${url#*://}
+    host=${host%%[/:?#]*}
+    ops_http_probe "$url"
+    if ((OPS_HTTP_RC != 0)); then
+      ops_curl_hint "$OPS_HTTP_RC" "$host"
+      ops_status CRIT http "$url did not respond: ${REPLY%%:*}" "target=$url" "expected=$expect" \
+        "curl_exit=$OPS_HTTP_RC" "hint=$REPLY"
+    elif [[ $OPS_HTTP_CODE == "$expect" ]]; then
+      ops_status OK http "$url returned $OPS_HTTP_CODE (${OPS_PROBE_MS} ms)" "target=$url" "value=$OPS_HTTP_CODE" \
+        "expected=$expect" "response_ms=$OPS_PROBE_MS"
+    else
+      local hint
+      case $OPS_HTTP_CODE in
+        5*) hint="the server answered but the application failed: check its logs (journalctl -u <unit>, docker logs <container>) and its dependencies (database, upstream APIs); reproduce with: curl -sv $url" ;;
+        4*) hint="wrong path, missing auth or routing problem: compare with 'curl -sv $url' and the proxy/vhost config" ;;
+        3*) hint="redirect (redirects are not followed): check the scheme/host in the URL or expect this status" ;;
+        *) hint="unexpected status: reproduce with 'curl -sv $url'" ;;
+      esac
+      ops_status CRIT http "$url returned $OPS_HTTP_CODE, expected $expect" "target=$url" "value=$OPS_HTTP_CODE" \
+        "expected=$expect" "response_ms=$OPS_PROBE_MS" "hint=$hint"
+    fi
+  done
+}
+
+main() {
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; exit 0 ;;
+      *) ops_usage_error "unknown argument: $1" ;;
+    esac
+  done
+  ops_init check
+  ops_require_min 1 OPS_CONNECT_TIMEOUT OPS_HTTP_TIMEOUT
+  if [[ -z ${OPS_SYSTEMD_UNITS//[[:space:]]/} && -z ${OPS_TCP_CHECKS//[[:space:]]/} && -z ${OPS_HTTP_CHECKS//[[:space:]]/} ]]; then
+    ops_die "no service checks configured" "set OPS_SYSTEMD_UNITS, OPS_TCP_CHECKS and/or OPS_HTTP_CHECKS in the config file"
+  fi
+  ops_require_cmd timeout
+  if [[ -n ${OPS_HTTP_CHECKS//[[:space:]]/} ]]; then ops_require_cmd curl; fi
+
+  check_systemd_units
+  check_tcp
+  check_http
+  ops_finish
+}
+
+main "$@"

@@ -1,0 +1,210 @@
+#!/usr/bin/env bash
+# ops-health - CPU load, memory, disk and inode usage with Nagios-style exit codes.
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=lib/common.sh
+source "$OPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ops-health [--help]
+
+Checks the local host and prints one JSON event per check (also appended to
+$OPS_LOG_DIR/ops-toolkit.jsonl):
+  cpu    1-minute load average as a % of CPU cores, CPU busy/iowait/steal %,
+         top CPU processes
+  memory % of memory in use, based on MemAvailable (page cache counts as free),
+         top processes by resident memory
+  disk   % space used per mounted filesystem
+  inode  % inodes used per mounted filesystem
+
+Thresholds (config file or environment; a value >= threshold triggers it):
+  OPS_LOAD_WARN  / OPS_LOAD_CRIT    load1 as % of cores   (default 100 / 200)
+  OPS_MEM_WARN   / OPS_MEM_CRIT     % memory used         (default 85 / 95)
+  OPS_DISK_WARN  / OPS_DISK_CRIT    % disk space used     (default 80 / 90)
+  OPS_INODE_WARN / OPS_INODE_CRIT   % inodes used         (default 80 / 90)
+  OPS_DISK_MOUNTS                   mount points to check (default: all, minus
+                                    OPS_DISK_EXCLUDE_TYPES)
+
+Exit codes: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN (worst result wins), 64 usage error.
+EOF
+}
+
+# top_processes cpu|mem - sets REPLY to "comm(pid) value%, ..." for the top OPS_TOP_N processes.
+# ps %cpu is the average over the process lifetime, not an instantaneous value.
+top_processes() {
+  local -a rows
+  local line pid val comm out="" n=0
+  if [[ $1 == cpu ]]; then
+    mapfile -t rows < <(ps -eo pid=,%cpu=,comm= --sort=-%cpu 2>/dev/null)
+  else
+    mapfile -t rows < <(ps -eo pid=,%mem=,comm= --sort=-rss 2>/dev/null)
+  fi
+  for line in "${rows[@]}"; do
+    if ((n >= OPS_TOP_N)); then break; fi
+    read -r pid val comm <<<"$line"
+    out+="${out:+, }$comm($pid) $val%"
+    n=$((n + 1))
+  done
+  REPLY=$out
+}
+
+# cpu_breakdown - sample /proc/stat twice; sets CPU_FIELDS (busy/iowait/steal %) or leaves it empty.
+cpu_breakdown() {
+  local -a a b
+  local total idle iowait steal i
+  CPU_FIELDS=()
+  if ((OPS_CPU_SAMPLE_SECS == 0)); then return 0; fi
+  read -r -a a 2>/dev/null <"$OPS_PROC_ROOT/stat" || return 0
+  sleep "$OPS_CPU_SAMPLE_SECS"
+  read -r -a b 2>/dev/null <"$OPS_PROC_ROOT/stat" || return 0
+  # cpu  user nice system idle iowait irq softirq steal
+  total=0
+  for i in 1 2 3 4 5 6 7 8; do
+    # Bash arithmetic evaluates text like a[$(cmd)]: only plain numbers may reach $(( )).
+    if [[ ! ${a[i]-} =~ ^[0-9]+$ || ! ${b[i]-} =~ ^[0-9]+$ ]]; then return 0; fi
+    total=$((total + b[i] - a[i]))
+  done
+  if ((total <= 0)); then return 0; fi
+  idle=$((b[4] - a[4]))
+  iowait=$((b[5] - a[5]))
+  steal=$((b[8] - a[8]))
+  CPU_FIELDS=("busy_pct=$(((total - idle - iowait) * 100 / total))"
+    "iowait_pct=$((iowait * 100 / total))" "steal_pct=$((steal * 100 / total))")
+}
+
+check_cpu() {
+  local load1 load5 load15 _rest cores pct level msg
+  if ! read -r load1 load5 load15 _rest 2>/dev/null <"$OPS_PROC_ROOT/loadavg"; then
+    ops_status UNKNOWN cpu "cannot read $OPS_PROC_ROOT/loadavg" hint="is /proc mounted? (mount | grep proc)"
+    return 0
+  fi
+  cores=$(nproc 2>/dev/null) || cores=""
+  if [[ ! $cores =~ ^[1-9][0-9]*$ || ! $load1 =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+    ops_status UNKNOWN cpu "cannot determine load ('$load1') or CPU count ('$cores')"
+    return 0
+  fi
+  pct=$(awk -v l="$load1" -v c="$cores" 'BEGIN { printf "%d", l * 100 / c + 0.5 }')
+  cpu_breakdown
+  top_processes cpu
+  local -a fields=("load1=$load1" "load5=$load5" "load15=$load15" "cores=$cores" "value=$pct"
+    "unit=%" "warn=$OPS_LOAD_WARN" "crit=$OPS_LOAD_CRIT" "${CPU_FIELDS[@]}" "top_cpu=$REPLY")
+  ops_classify "$pct" "$OPS_LOAD_WARN" "$OPS_LOAD_CRIT"
+  level=$REPLY
+  msg="load1 $load1 on $cores cores = ${pct}% of capacity"
+  if [[ $level == OK ]]; then
+    ops_status OK cpu "$msg" "${fields[@]}"
+  else
+    local thr=$OPS_LOAD_WARN
+    if [[ $level == CRIT ]]; then thr=$OPS_LOAD_CRIT; fi
+    ops_status "$level" cpu "$msg (>= ${level,,} threshold ${thr}%)" "${fields[@]}" "threshold=$thr" \
+      "hint=find the busy processes: ps -eo pid,ppid,cmd,%cpu --sort=-%cpu | head; high iowait_pct means processes wait on disk (vmstat 1 5, iostat -x 1 3); high steal_pct means the hypervisor is starving this VM"
+  fi
+}
+
+check_memory() {
+  local key val _unit total="" avail="" pct level msg
+  while read -r key val _unit; do
+    case $key in
+      MemTotal:) total=$val ;;
+      MemAvailable:) avail=$val ;;
+    esac
+  done 2>/dev/null <"$OPS_PROC_ROOT/meminfo" || true
+  if [[ ! $total =~ ^[1-9][0-9]*$ || ! $avail =~ ^[0-9]+$ ]]; then
+    ops_status UNKNOWN memory "cannot read MemTotal/MemAvailable from $OPS_PROC_ROOT/meminfo"
+    return 0
+  fi
+  pct=$((((total - avail) * 100 + total / 2) / total))
+  top_processes mem
+  local -a fields=("value=$pct" "unit=%" "warn=$OPS_MEM_WARN" "crit=$OPS_MEM_CRIT"
+    "total_mb=$((total / 1024))" "available_mb=$((avail / 1024))" "top_mem=$REPLY")
+  ops_classify "$pct" "$OPS_MEM_WARN" "$OPS_MEM_CRIT"
+  level=$REPLY
+  msg="memory ${pct}% used ($((avail / 1024)) MiB of $((total / 1024)) MiB available)"
+  if [[ $level == OK ]]; then
+    ops_status OK memory "$msg" "${fields[@]}"
+  else
+    local thr=$OPS_MEM_WARN
+    if [[ $level == CRIT ]]; then thr=$OPS_MEM_CRIT; fi
+    ops_status "$level" memory "$msg (>= ${level,,} threshold ${thr}%)" "${fields[@]}" "threshold=$thr" \
+      "hint=find the largest processes: ps -eo pid,comm,rss --sort=-rss | head; check swap with 'free -m' and OOM kills with 'journalctl -k | grep -i \"out of memory\"'"
+  fi
+}
+
+# report_usage CHECK MOUNT USED WARN CRIT HINT [fields...]
+report_usage() {
+  local check=$1 mount=$2 used=$3 warn=$4 crit=$5 hint=$6 msg
+  shift 6
+  msg="$mount is ${used}% full"
+  if [[ $check == inode ]]; then msg="$mount has ${used}% of its inodes in use"; fi
+  ops_classify "$used" "$warn" "$crit"
+  if [[ $REPLY == OK ]]; then
+    ops_status OK "$check" "$msg" "mount=$mount" "value=$used" "unit=%" "warn=$warn" "crit=$crit" "$@"
+  else
+    local thr=$warn
+    if [[ $REPLY == CRIT ]]; then thr=$crit; fi
+    ops_status "$REPLY" "$check" "$msg (>= ${REPLY,,} threshold ${thr}%)" \
+      "mount=$mount" "value=$used" "unit=%" "warn=$warn" "crit=$crit" "threshold=$thr" "$@" "hint=$hint"
+  fi
+}
+
+check_disk() {
+  local -a args=("--output=source,fstype,pcent,ipcent,target") types mounts
+  local t out rc=0 line src fstype pcent ipcent target checked=0 errors=0
+  read -r -a types <<<"$OPS_DISK_EXCLUDE_TYPES"
+  read -r -a mounts <<<"$OPS_DISK_MOUNTS"
+  for t in "${types[@]}"; do args+=(-x "$t"); done
+  # `timeout`: a hung NFS/CIFS mount would otherwise block df (and this check) forever.
+  out=$(timeout -k 2 20 df "${args[@]}" -- "${mounts[@]}" 2>&1) || rc=$?
+  while IFS= read -r line; do
+    if [[ $line == "df: "* || $line == "timeout: "* ]]; then
+      errors=$((errors + 1))
+      ops_status UNKNOWN disk "${line}" hint="check OPS_DISK_MOUNTS and that the mount is healthy ('findmnt', 'mount')"
+      continue
+    fi
+    if [[ $line =~ ^Filesystem[[:space:]] || -z $line ]]; then continue; fi
+    read -r src fstype pcent ipcent target <<<"$line"
+    pcent=${pcent%\%}
+    ipcent=${ipcent%\%}
+    if [[ $pcent =~ ^[0-9]+$ ]]; then
+      checked=$((checked + 1))
+      report_usage disk "$target" "$pcent" "$OPS_DISK_WARN" "$OPS_DISK_CRIT" \
+        "find what grew: du -xh --max-depth=1 $target | sort -h | tail; space held by deleted-but-open files: lsof +L1; journal size: journalctl --disk-usage" \
+        "fstype=$fstype" "source=$src"
+    fi
+    if [[ $ipcent =~ ^[0-9]+$ ]]; then
+      report_usage inode "$target" "$ipcent" "$OPS_INODE_WARN" "$OPS_INODE_CRIT" \
+        "inodes exhausted (many small files) - 'No space left on device' although df -h shows free space: df -i $target; find the directory with most entries: find $target -xdev -printf '%h\n' | sort | uniq -c | sort -n | tail" \
+        "fstype=$fstype" "source=$src"
+    fi
+  done <<<"$out"
+  if ((rc == 124 || rc == 137)); then
+    ops_status UNKNOWN disk "df did not finish within 20s" hint="a network filesystem is probably hung: check 'findmnt -t nfs,nfs4,cifs' and 'dmesg -T | tail'"
+  elif ((checked == 0 && errors == 0)); then
+    # Never report OK when nothing was measured (df failed silently or matched no filesystem).
+    ops_status UNKNOWN disk "df reported no filesystems (exit $rc)" hint="run 'df -h' by hand; check OPS_DISK_MOUNTS / OPS_DISK_EXCLUDE_TYPES"
+  fi
+}
+
+main() {
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; exit 0 ;;
+      *) ops_usage_error "unknown argument: $1" ;;
+    esac
+  done
+  ops_init check
+  ops_require_thresholds OPS_LOAD_WARN OPS_LOAD_CRIT
+  ops_require_thresholds OPS_MEM_WARN OPS_MEM_CRIT
+  ops_require_thresholds OPS_DISK_WARN OPS_DISK_CRIT
+  ops_require_thresholds OPS_INODE_WARN OPS_INODE_CRIT
+  ops_require_uint OPS_TOP_N OPS_CPU_SAMPLE_SECS
+  ops_require_cmd awk df nproc ps timeout
+
+  check_cpu
+  check_memory
+  check_disk
+  ops_finish
+}
+
+main "$@"

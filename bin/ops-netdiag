@@ -1,0 +1,185 @@
+#!/usr/bin/env bash
+# ops-netdiag - step-by-step network diagnosis for one host: resolver config, DNS, route, TCP, HTTP.
+set -Eeuo pipefail
+OPS_ROOT=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+# shellcheck source=lib/common.sh
+source "$OPS_ROOT/lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+Usage: ops-netdiag [--http] HOST [PORT]
+
+Diagnoses connectivity to HOST in the order packets need it and prints one
+JSON event per step, each failure with a concrete next command:
+  resolver  nameservers in /etc/resolv.conf, 'hosts:' line of /etc/nsswitch.conf
+  dns       getent ahosts HOST (same resolver path as applications: /etc/hosts, DNS)
+  route     default route and the route the kernel would use to reach HOST
+  tcp       TCP connect to HOST:PORT with a timeout (only if PORT is given)
+  http      HTTP status of http(s)://HOST:PORT/ (only with --http; https if PORT
+            is 443 or omitted)
+
+Options:
+  --http      also request http(s)://HOST:PORT/ and report the status code
+  -h, --help  show this help
+
+Timeouts: OPS_CONNECT_TIMEOUT (default 5 s), OPS_HTTP_TIMEOUT (default 10 s).
+Exit codes: 0 OK, 1 WARNING, 2 CRITICAL, 3 UNKNOWN, 64 usage error.
+EOF
+}
+
+RESOLVED_ADDR=""
+
+step_resolver() {
+  local -a ns=()
+  local key val _rest nss=""
+  if [[ -r /etc/resolv.conf ]]; then
+    while read -r key val _rest; do
+      if [[ $key == nameserver && -n $val ]]; then ns+=("$val"); fi
+    done </etc/resolv.conf
+  fi
+  if [[ -r /etc/nsswitch.conf ]]; then
+    nss=$(awk '$1 == "hosts:" { $1 = ""; sub(/^ /, ""); print; exit }' /etc/nsswitch.conf)
+  fi
+  local list="${ns[*]}"
+  if ((${#ns[@]} == 0)); then
+    ops_status WARN resolver "no nameserver in /etc/resolv.conf" "nsswitch_hosts=$nss" \
+      hint="without a nameserver glibc falls back to 127.0.0.1; fix the network config (netplan / systemd-resolved: 'resolvectl status')"
+  elif [[ $list == *127.0.0.53* ]]; then
+    ops_status OK resolver "nameservers: $list (systemd-resolved stub; upstream servers: resolvectl status)" \
+      "nameservers=$list" "nsswitch_hosts=$nss"
+  else
+    ops_status OK resolver "nameservers: $list" "nameservers=$list" "nsswitch_hosts=$nss"
+  fi
+}
+
+step_dns() {
+  local host=$1 out rc=0 addrs hosts_entry
+  if [[ $host =~ ^[0-9.]+$ || $host == *:* ]]; then
+    RESOLVED_ADDR=$host
+    ops_status OK dns "$host is an IP address; DNS not needed" "addresses=$host"
+    return 0
+  fi
+  hosts_entry=$(awk -v h="$host" '$1 !~ /^#/ { for (i = 2; i <= NF; i++) if ($i == h) { print $1; exit } }' /etc/hosts 2>/dev/null) || true
+  ops_now_ms
+  local start=$REPLY
+  out=$(timeout -k 1 "$OPS_CONNECT_TIMEOUT" getent ahosts "$host" 2>/dev/null) || rc=$?
+  ops_now_ms
+  local ms=$((REPLY - start))
+  addrs=$(awk '!seen[$1]++ { printf "%s%s", sep, $1; sep = "," }' <<<"$out")
+  if ((rc == 0)) && [[ -n $addrs ]]; then
+    RESOLVED_ADDR=${addrs%%,*}
+    ops_status OK dns "$host resolves to $addrs (${ms} ms)" "addresses=$addrs" "resolve_ms=$ms" \
+      ${hosts_entry:+"etc_hosts=$hosts_entry"}
+    return 0
+  fi
+  local why="no address found (NXDOMAIN or no A/AAAA record)"
+  if ((rc == 124)); then why="lookup timed out after ${OPS_CONNECT_TIMEOUT}s (resolver not answering)"; fi
+  ops_status CRIT dns "DNS failed for $host: $why" "getent_exit=$rc" "resolve_ms=$ms" \
+    "hint=check the name for typos; check /etc/resolv.conf and 'resolvectl status'; ask the resolver directly: 'resolvectl query $host' or 'dig $host'; compare with a public resolver: 'dig $host @1.1.1.1'; check the 'hosts:' line in /etc/nsswitch.conf and /etc/hosts"
+}
+
+step_route() {
+  local -a lines
+  local default="" path="" rc=0
+  if ! command -v ip >/dev/null 2>&1; then
+    ops_status UNKNOWN route "'ip' command not found" hint="install iproute2"
+    return 0
+  fi
+  mapfile -t lines < <(ip -o route show default 2>/dev/null)
+  default=${lines[0]-}
+  default=${default%% proto *}
+  if [[ -n $RESOLVED_ADDR ]]; then
+    path=$(ip route get "$RESOLVED_ADDR" 2>&1) || rc=$?
+    path=${path%%$'\n'*}
+    if ((rc != 0)); then
+      ops_status CRIT route "no route to $RESOLVED_ADDR: $path" "default_route=${default:-none}" \
+        hint="check 'ip route' and 'ip addr': is the interface up and is there a default gateway? (netplan / 'networkctl status')"
+      return 0
+    fi
+    ops_status OK route "route to $RESOLVED_ADDR: ${path%% uid *}" "default_route=${default:-none}" "path=${path%% uid *}"
+  elif [[ -n $default ]]; then
+    ops_status OK route "$default" "default_route=$default"
+  else
+    ops_status WARN route "no default route: only directly connected networks are reachable" "default_route=none" \
+      hint="check 'ip route' and the DHCP/static config (netplan, 'networkctl status')"
+  fi
+}
+
+step_tcp() {
+  local host=$1 port=$2
+  if [[ -z $RESOLVED_ADDR ]]; then
+    ops_status UNKNOWN tcp "skipped: $host did not resolve" "target=$host:$port"
+    return 0
+  fi
+  ops_tcp_probe "$host" "$port" "$OPS_CONNECT_TIMEOUT"
+  if [[ $REPLY == open ]]; then
+    ops_status OK tcp "connected to $host:$port in ${OPS_PROBE_MS} ms" "target=$host:$port" "connect_ms=$OPS_PROBE_MS"
+  else
+    local reason=$REPLY
+    ops_tcp_hint "$reason" "$host" "$port"
+    ops_status CRIT tcp "TCP connect to $host:$port failed: $reason" "target=$host:$port" "result=$reason" \
+      "timeout_s=$OPS_CONNECT_TIMEOUT" "hint=$REPLY"
+  fi
+}
+
+step_http() {
+  local host=$1 port=$2 scheme=http url h=$1
+  if [[ $port == 443 ]]; then scheme=https; fi
+  if [[ $host == *:* ]]; then h="[$host]"; fi
+  url="$scheme://$h:$port/"
+  if [[ -z $RESOLVED_ADDR ]]; then
+    ops_status UNKNOWN http "skipped: $host did not resolve" "target=$url"
+    return 0
+  fi
+  ops_http_probe "$url"
+  if ((OPS_HTTP_RC != 0)); then
+    ops_curl_hint "$OPS_HTTP_RC" "$host"
+    ops_status CRIT http "$url: ${REPLY%%:*}" "target=$url" "curl_exit=$OPS_HTTP_RC" "hint=$REPLY"
+  elif [[ $OPS_HTTP_CODE == 5* ]]; then
+    ops_status WARN http "$url returned $OPS_HTTP_CODE: the network path works, the application is failing" \
+      "target=$url" "value=$OPS_HTTP_CODE" "response_ms=$OPS_PROBE_MS" \
+      hint="check the application and its upstreams; reproduce with: curl -sv $url"
+  else
+    ops_status OK http "$url returned $OPS_HTTP_CODE (${OPS_PROBE_MS} ms)" "target=$url" "value=$OPS_HTTP_CODE" \
+      "response_ms=$OPS_PROBE_MS"
+  fi
+}
+
+main() {
+  local http=0
+  local -a pos=()
+  while (($#)); do
+    case $1 in
+      -h | --help) usage; exit 0 ;;
+      --http) http=1 ;;
+      --) shift; pos+=("$@"); break ;;
+      -*) ops_usage_error "unknown option: $1" ;;
+      *) pos+=("$1") ;;
+    esac
+    shift
+  done
+  if ((${#pos[@]} < 1 || ${#pos[@]} > 2)); then ops_usage_error "expected HOST [PORT]"; fi
+  local host=${pos[0]} port=${pos[1]-}
+  # Strict validation: the host ends up as an argument to getent/ip/curl.
+  if [[ ! $host =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ && ! $host =~ ^[0-9A-Fa-f:]*:[0-9A-Fa-f:.]*$ ]]; then
+    ops_usage_error "invalid host: '$host'"
+  fi
+  if [[ -n $port && ! $port =~ ^[1-9][0-9]{0,4}$ ]] || { [[ -n $port ]] && ((port > 65535)); }; then
+    ops_usage_error "invalid port: '$port'"
+  fi
+  if ((http)) && [[ -z $port ]]; then port=443; fi
+
+  ops_init check
+  ops_require_min 1 OPS_CONNECT_TIMEOUT OPS_HTTP_TIMEOUT
+  ops_require_cmd awk getent timeout
+  if ((http)); then ops_require_cmd curl; fi
+
+  step_resolver
+  step_dns "$host"
+  step_route
+  if [[ -n $port ]]; then step_tcp "$host" "$port"; fi
+  if ((http)); then step_http "$host" "$port"; fi
+  ops_finish
+}
+
+main "$@"
